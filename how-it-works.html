@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d0b">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="How the Closed room chat works: peer-to-peer connections, what each party can see, and the known limits.">
+  <title>How it works · Closed room</title>
+  <link rel="canonical" href="https://closedroom.site/how-it-works.html">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d0b'/%3E%3Crect x='8' y='6' width='16' height='20' rx='1.5' fill='none' stroke='%234fc178' stroke-width='2'/%3E%3Cpath d='M8 12h16' stroke='%234fc178' stroke-width='2'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #0b0d0b;
+      --raise: #121512;
+      --ink: #e4e8e1;
+      --muted: #8d968a;
+      --line: #1f261f;
+      --accent: #4fc178;
+      --serif: Georgia, "Times New Roman", "DejaVu Serif", serif;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
+      --mono: ui-monospace, "DejaVu Sans Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+
+    body {
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+      color-scheme: dark;
+    }
+
+    ::selection { background: #2f6b45; color: #fff; }
+
+    a { color: var(--accent); text-underline-offset: 3px; }
+
+    a:hover { filter: brightness(1.15); }
+
+    main {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 28px 20px calc(48px + env(safe-area-inset-bottom));
+    }
+
+    .back { font-size: 0.92rem; }
+
+    .kicker {
+      margin: 28px 0 12px;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: clamp(2.2rem, 9vw, 3.6rem);
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .lede { margin: 16px 0 0; color: var(--muted); font-size: 1.05rem; max-width: 40ch; }
+
+    h2 {
+      margin: 44px 0 12px;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 1.5rem;
+      letter-spacing: -0.01em;
+    }
+
+    p { margin: 0 0 14px; }
+
+    ol, ul { margin: 0 0 14px; padding-left: 1.3rem; }
+
+    li { margin-bottom: 10px; }
+
+    li::marker { color: var(--accent); }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--raise);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 1px 6px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--raise);
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 34rem; }
+
+    th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+
+    th { color: var(--muted); font-weight: 500; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; }
+
+    tr:last-child td { border-bottom: 0; }
+
+    td:first-child { font-weight: 500; white-space: nowrap; }
+
+    .note {
+      border-left: 3px solid var(--accent);
+      padding: 4px 0 4px 14px;
+      color: var(--muted);
+      margin: 18px 0;
+    }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="index.html">← Back to the chat</a>
+
+    <p class="kicker">Under the hood</p>
+    <h1>How it works</h1>
+    <p class="lede">A two-person chat with no chat server. This page explains what that means, and where it stops being true.</p>
+
+    <h2>In short</h2>
+    <p>This site is one static page. It has no backend, no accounts and no database. When two people open it and type the same phrase, their browsers find each other and open a direct, encrypted connection. Messages travel over that connection and nowhere else.</p>
+
+    <h2>Step by step</h2>
+    <ol>
+      <li><strong>You type a nickname and a phrase.</strong> The phrase is your room's password. Nobody checks it against a list, it only has to match.</li>
+      <li><strong>Your browser hashes the phrase.</strong> It computes SHA-256 of the lowercased phrase and keeps the first 32 hex characters. That is the room ID. The phrase itself is never sent anywhere.</li>
+      <li><strong>Browsers find each other.</strong> Using the open-source library <a href="https://github.com/dmotz/trystero" rel="noopener noreferrer">Trystero</a>, each browser posts a small signaling note to public Nostr relays, tagged with the room ID. The note is encrypted with your phrase, so relays only see unreadable data.</li>
+      <li><strong>A direct connection opens.</strong> When two browsers read each other's notes they set up a WebRTC connection. WebRTC data channels are encrypted in transit (DTLS).</li>
+      <li><strong>Messages go browser to browser.</strong> Nothing is sent to the site's host or to the relays. Nothing is written to disk or to a database.</li>
+      <li><strong>You close the tab and it's gone.</strong> There is no history to recover.</li>
+    </ol>
+
+    <h2>Who can see what</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Party</th><th>Can see</th><th>Cannot see</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>The other person</td><td>Your nickname, your messages, your IP address</td><td>Anything outside the chat</td></tr>
+          <tr><td>The site's host</td><td>That someone downloaded this page (IP, time)</td><td>Phrases, nicknames, messages</td></tr>
+          <tr><td>Nostr relays</td><td>Your IP, the hashed room ID, encrypted signaling data</td><td>The phrase, nicknames, messages</td></tr>
+          <tr><td>STUN servers</td><td>Your IP, to help work out your public address</td><td>Phrases, nicknames, messages</td></tr>
+          <tr><td>The CDN</td><td>That the Trystero library was loaded (IP, time)</td><td>Phrases, nicknames, messages</td></tr>
+          <tr><td>Your network provider</td><td>That you connected to the peer and to relays, and how much data moved</td><td>Message contents</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Known limits</h2>
+    <ul>
+      <li><strong>The phrase is the only lock.</strong> Anyone who guesses it can join with any nickname. Use something long and random, such as three unrelated words, and share it in person or over a channel you trust. Avoid "test" or "chat".</li>
+      <li><strong>No identity check.</strong> A nickname is just text. Nothing proves who is behind it.</li>
+      <li><strong>Your IP is visible to the other person.</strong> That is how direct connections work. If that matters, this tool is not the right one.</li>
+      <li><strong>Both people must be online at the same time.</strong> Messages can't wait for someone who isn't there.</li>
+      <li><strong>Some networks block it.</strong> There is no TURN relay, so strict firewalls, some mobile networks and some corporate Wi-Fi can stop the connection. Try another network.</li>
+      <li><strong>Built for small rooms.</strong> Every person connects to every other person, so it works best with two to a handful of people.</li>
+      <li><strong>It trusts the code you load.</strong> If the host or the CDN were compromised, the page could be altered. That is why the source is public and small.</li>
+    </ul>
+
+    <p class="note">Not for situations where your safety depends on anonymity. This tool keeps messages off servers, not you off the network.</p>
+
+    <h2>Source code</h2>
+    <p>The whole project is two HTML files. Read it, check it, or host your own copy: <a href="https://github.com/lianshao09/ClosedRoom" rel="noopener noreferrer">github.com/lianshao09/ClosedRoom</a></p>
+
+    <footer>No cookies, no analytics, no accounts.</footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d0b">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Private peer-to-peer chat. The room phrase never leaves your browser and messages are not stored.">
+  <title>Closed room</title>
+  <link rel="canonical" href="https://closedroom.site/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://closedroom.site/">
+  <meta property="og:title" content="Closed room">
+  <meta property="og:description" content="Private peer-to-peer chat. The room phrase never leaves your browser and messages are not stored.">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d0b'/%3E%3Crect x='8' y='6' width='16' height='20' rx='1.5' fill='none' stroke='%234fc178' stroke-width='2'/%3E%3Cpath d='M8 12h16' stroke='%234fc178' stroke-width='2'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #0b0d0b;
+      --raise: #121512;
+      --ink: #e4e8e1;
+      --muted: #8d968a;
+      --line: #1f261f;
+      --accent: #4fc178;
+      --accent-ink: #07140b;
+      --own: #1b3324;
+      --own-ink: #e6f4ea;
+      --serif: Georgia, "Times New Roman", "DejaVu Serif", serif;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
+      --mono: ui-monospace, "DejaVu Sans Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.5;
+      color-scheme: dark;
+    }
+
+    body.locked {
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    button, input, textarea { font: inherit; color: inherit; }
+
+    button { cursor: pointer; }
+
+    button:disabled { cursor: default; opacity: 0.5; }
+
+    ::selection { background: #2f6b45; color: #fff; }
+
+    .sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .join {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .intro { padding: 28px 20px 4px; }
+
+    .kicker {
+      margin: 0 0 12px;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: clamp(2.5rem, 10vw, 4.6rem);
+      line-height: 0.98;
+      letter-spacing: -0.03em;
+    }
+
+    .dek {
+      margin: 16px 0 0;
+      max-width: 38ch;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    .links { margin: 18px 0 0; font-size: 0.95rem; color: var(--muted); }
+
+    .links a { color: var(--accent); text-underline-offset: 3px; }
+
+    .links a:hover { filter: brightness(1.15); }
+
+    .panel { padding: 18px 20px 8px; }
+
+    .sheet {
+      background: var(--raise);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+
+    .hint, .facts li, .empty, .meta, .notice, .sub {
+      color: var(--muted);
+    }
+
+    .hint {
+      margin: 6px 0 0;
+      font-size: 0.84rem;
+      line-height: 1.4;
+    }
+
+    input, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 14px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    textarea {
+      resize: none;
+      min-height: 48px;
+      max-height: 140px;
+    }
+
+    input:focus, textarea:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      border-color: transparent;
+    }
+
+    input::placeholder, textarea::placeholder { color: #5d655a; }
+
+    .error, .send-status {
+      min-height: 1.25em;
+      margin: 0;
+      color: var(--accent);
+      font-size: 0.88rem;
+    }
+
+    .error:empty, .send-status:empty { display: none; }
+
+    #enter, #send {
+      border: 0;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+    }
+
+    #enter {
+      min-height: 52px;
+      border-radius: 14px;
+    }
+
+    #enter:not(:disabled):hover, #send:not(:disabled):hover { filter: brightness(1.08); }
+
+    #enter:not(:disabled):active, #send:not(:disabled):active, #leave:not(:disabled):active {
+      transform: scale(0.98);
+    }
+
+    .facts {
+      list-style: none;
+      margin: 8px 0 0;
+      padding: 8px 20px 28px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .facts li {
+      position: relative;
+      padding-left: 16px;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .facts li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.5em;
+      width: 7px;
+      height: 7px;
+      background: var(--accent);
+    }
+
+    .chat {
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .chat header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px 12px;
+      padding-top: max(14px, env(safe-area-inset-top));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .whoami { min-width: 0; }
+
+    #you {
+      font-size: 1.45rem;
+      line-height: 1.15;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sub, .presence, .waiting { margin: 2px 0 0; font-size: 0.84rem; }
+
+    .presence { color: var(--ink); }
+
+    .waiting { color: var(--accent); }
+
+    .fp { font-family: var(--mono); letter-spacing: 0.03em; }
+
+    #leave {
+      flex: none;
+      min-height: 44px;
+      padding: 0 16px;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+    }
+
+    #leave:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
+    .log {
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px;
+    }
+
+    .empty {
+      margin: auto;
+      max-width: 28rem;
+      text-align: center;
+      padding: 12px;
+    }
+
+    .notice {
+      align-self: center;
+      margin: 6px 0;
+      font-size: 0.82rem;
+      text-align: center;
+    }
+
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: min(82%, 34rem);
+    }
+
+    .msg.mine { align-self: flex-end; align-items: flex-end; }
+
+    .msg.theirs { align-self: flex-start; align-items: flex-start; }
+
+    .bubble {
+      margin: 0;
+      padding: 10px 14px;
+      border-radius: 16px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .msg.mine .bubble {
+      background: var(--own);
+      color: var(--own-ink);
+      border-bottom-right-radius: 5px;
+    }
+
+    .msg.theirs .bubble {
+      background: var(--raise);
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 5px;
+    }
+
+    .meta { font-size: 0.75rem; }
+
+    .send-status { padding: 0 16px; }
+
+    .composer {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      padding: 10px 12px calc(18px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--line);
+    }
+
+    #send {
+      width: 48px;
+      height: 48px;
+      flex: none;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+    }
+
+    .counter {
+      margin: -6px 0 0;
+      text-align: right;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .counter[hidden] { display: none !important; }
+
+    @media (min-width: 880px) {
+      .join {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+        grid-template-rows: 1fr auto;
+      }
+
+      .intro {
+        grid-column: 1;
+        grid-row: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        padding: 64px 56px 12px;
+      }
+
+      .facts {
+        grid-column: 1;
+        grid-row: 2;
+        align-self: start;
+        padding: 12px 56px 64px;
+        max-width: 46rem;
+      }
+
+      .panel {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        display: flex;
+        align-items: center;
+        background: var(--raise);
+        border-left: 1px solid var(--line);
+        padding: 64px 48px;
+      }
+
+      .sheet {
+        width: 100%;
+        max-width: 420px;
+        background: transparent;
+        border: 0;
+        padding: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #enter, #send, #leave { transition: none; }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .msg, .notice { animation: rise 180ms ease-out; }
+      #enter, #send, #leave { transition: transform 150ms ease, filter 150ms ease, border-color 150ms ease, color 150ms ease; }
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="join" class="join">
+    <section class="intro">
+      <p class="kicker">Direct</p>
+      <h1>Closed<br>room</h1>
+      <p class="dek">Browser-to-browser chat. The phrase stays here. Messages don't pass through a server and aren't stored.</p>
+      <p class="links"><a href="how-it-works.html">How it works</a><span aria-hidden="true"> · </span><a href="https://github.com/lianshao09/ClosedRoom" rel="noopener noreferrer">Source on GitHub</a></p>
+    </section>
+    <section class="panel">
+      <form id="join-form" class="sheet" autocomplete="off">
+        <div>
+          <label for="nick">Nickname</label>
+          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. Maria">
+          <p class="hint">Up to 24 characters.</p>
+        </div>
+        <div>
+          <label for="phrase">Room phrase</label>
+          <input id="phrase" name="phrase" maxlength="200" required autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="a phrase only you two know">
+          <p class="hint">Upper and lower case matter. Only a hash goes to the relays, not the phrase.</p>
+        </div>
+        <p id="form-error" class="error" role="alert"></p>
+        <button id="enter" type="submit" disabled>Loading…</button>
+      </form>
+    </section>
+    <ul class="facts">
+      <li>The room ID is the first 32 hex characters of the SHA-256 of the lowercased phrase.</li>
+      <li>The connection is WebRTC, without TURN. On a very restrictive network the other person may not show up.</li>
+      <li>Nothing remains after you leave or close the tab.</li>
+    </ul>
+  </div>
+
+  <div id="chat" class="chat" hidden>
+    <header>
+      <div class="whoami">
+        <h1 id="you"></h1>
+        <p id="print" class="sub"></p>
+        <p id="count" class="presence"></p>
+        <p id="waiting" class="waiting"></p>
+      </div>
+      <button id="leave" type="button">Leave</button>
+    </header>
+    <div id="log" class="log" role="log" aria-live="polite" aria-relevant="additions">
+      <p id="empty" class="empty">Anyone who types the same phrase appears here. The conversation isn't kept anywhere.</p>
+    </div>
+    <p id="counter" class="counter" hidden>0 / 2000</p>
+    <p id="send-status" class="send-status" role="status"></p>
+    <form id="composer" class="composer">
+      <label class="sr" for="draft">Message</label>
+      <textarea id="draft" maxlength="2000" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
+      <button id="send" type="submit" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M4 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </button>
+    </form>
+  </div>
+
+  <noscript>
+    <p class="dek" style="padding: 24px">JavaScript is required. There is no server behind this page.</p>
+  </noscript>
+
+  <script type="module">
+    // Room id = SHA-256("chat-v1:" + lowercase phrase), first 32 hex chars.
+    // The phrase itself is only Trystero's password, so Nostr relays never see it.
+    // Two actions, created once per visit: "msg" and "nick". No TURN, no storage.
+
+    const APP_ID = "chat-v1";
+    const RELAYS = [
+      "wss://nos.lol",
+      "wss://relay.primal.net",
+      "wss://relay.snort.social"
+    ];
+
+    const joinEl = document.getElementById("join");
+    const chatEl = document.getElementById("chat");
+    const form = document.getElementById("join-form");
+    const nickInput = document.getElementById("nick");
+    const phraseInput = document.getElementById("phrase");
+    const formError = document.getElementById("form-error");
+    const enterBtn = document.getElementById("enter");
+    const youEl = document.getElementById("you");
+    const printEl = document.getElementById("print");
+    const countEl = document.getElementById("count");
+    const waitingEl = document.getElementById("waiting");
+    const logEl = document.getElementById("log");
+    const emptyEl = document.getElementById("empty");
+    const leaveBtn = document.getElementById("leave");
+    const composer = document.getElementById("composer");
+    const draft = document.getElementById("draft");
+    const sendStatus = document.getElementById("send-status");
+    const counter = document.getElementById("counter");
+
+    let joinRoom = null;
+    let selfId = "";
+    let session = null;
+    let generation = 0;
+
+    function cleanNick(value) {
+      return String(value ?? "")
+        .replace(/[\u0000-\u001F\u007F]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 24);
+    }
+
+    function cleanMsg(value) {
+      return String(value ?? "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+        .slice(0, 2000)
+        .trim();
+    }
+
+    async function roomIdFromPhrase(phrase) {
+      const bytes = new TextEncoder().encode("chat-v1:" + phrase.toLowerCase());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      let hex = "";
+      for (const byte of new Uint8Array(digest)) {
+        hex += byte.toString(16).padStart(2, "0");
+      }
+      return hex.slice(0, 32);
+    }
+
+    function clearChildren(node) {
+      while (node.firstChild) node.removeChild(node.firstChild);
+    }
+
+    function pushNode(node) {
+      const stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 96;
+      emptyEl.hidden = true;
+      logEl.append(node);
+      if (stick) logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function addNotice(text) {
+      const p = document.createElement("p");
+      p.className = "notice";
+      p.textContent = text;
+      pushNode(p);
+      return p;
+    }
+
+    function renderPresence() {
+      const n = session ? session.peers.size : 0;
+      countEl.textContent = `Connected: ${n}`;
+      waitingEl.hidden = n !== 0;
+      if (n === 0) waitingEl.textContent = "Waiting for someone";
+    }
+
+    function setFingerprint(roomId) {
+      clearChildren(printEl);
+      const label = document.createElement("span");
+      label.textContent = "fingerprint ";
+      const code = document.createElement("span");
+      code.className = "fp";
+      code.textContent = roomId.slice(0, 8);
+      printEl.append(label, code);
+    }
+
+    function addMessage(text, mine, peer) {
+      const row = document.createElement("div");
+      row.className = mine ? "msg mine" : "msg theirs";
+
+      const bubble = document.createElement("p");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+      if (mine) {
+        meta.textContent = time;
+        row.append(bubble, meta);
+      } else {
+        const who = document.createElement("span");
+        who.textContent = peer.nick || "…";
+        peer.nameEls.push(who);
+        const sep = document.createElement("span");
+        sep.textContent = " · ";
+        const clock = document.createElement("time");
+        clock.textContent = time;
+        meta.append(who, sep, clock);
+        row.append(meta, bubble);
+      }
+
+      pushNode(row);
+    }
+
+    function resetLog() {
+      clearChildren(logEl);
+      emptyEl.hidden = false;
+      logEl.append(emptyEl);
+      draft.value = "";
+      draft.style.height = "auto";
+      counter.hidden = true;
+      sendStatus.textContent = "";
+    }
+
+    function showJoin() {
+      chatEl.hidden = true;
+      joinEl.hidden = false;
+      document.body.classList.remove("locked");
+      document.title = "Closed room";
+    }
+
+    function showChat() {
+      joinEl.hidden = true;
+      chatEl.hidden = false;
+      document.body.classList.add("locked");
+    }
+
+    function fitDraft() {
+      draft.style.height = "auto";
+      draft.style.height = Math.min(draft.scrollHeight, 140) + "px";
+      const n = draft.value.length;
+      counter.hidden = n < 1800;
+      counter.textContent = `${n} / 2000`;
+    }
+
+    async function enterRoom(nick, phrase) {
+      if (!joinRoom) return;
+      if (!crypto.subtle) {
+        formError.textContent = "Your browser has no crypto support here. Open the page over https.";
+        return;
+      }
+
+      const gen = ++generation;
+      enterBtn.disabled = true;
+      enterBtn.textContent = "Connecting…";
+      formError.textContent = "";
+
+      let roomId = "";
+      try {
+        roomId = await roomIdFromPhrase(phrase);
+      } catch {
+        formError.textContent = "Couldn't compute the room fingerprint.";
+        enterBtn.disabled = false;
+        enterBtn.textContent = "Enter";
+        return;
+      }
+
+      let room;
+      try {
+        room = joinRoom(
+          { appId: APP_ID, password: phrase, relayUrls: RELAYS },
+          roomId,
+          () => {
+            if (session && session.gen === gen) {
+              sendStatus.textContent = "Someone with the same fingerprint has a different phrase.";
+            }
+          }
+        );
+      } catch {
+        formError.textContent = "Joining the room failed.";
+        enterBtn.disabled = false;
+        enterBtn.textContent = "Enter";
+        return;
+      }
+
+      if (gen !== generation) {
+        try { await room.leave(); } catch { /* superseded */ }
+        return;
+      }
+
+      const [sendMsg, onMsg] = room.makeAction("msg");
+      const [sendNick, onNick] = room.makeAction("nick");
+
+      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId };
+
+      onMsg((data, id) => {
+        if (!session || session.gen !== gen || typeof data !== "string") return;
+        const text = cleanMsg(data);
+        if (!text) return;
+        const peer = session.peers.get(id) || trackPeer(id);
+        addMessage(text, false, peer);
+      });
+
+      onNick((data, id) => {
+        if (!session || session.gen !== gen || typeof data !== "string") return;
+        const peer = session.peers.get(id);
+        if (!peer) return;
+        const name = cleanNick(data) || "anonymous";
+        peer.nick = name;
+        for (const el of peer.nameEls) el.textContent = name;
+        if (peer.notice) peer.notice.textContent = `${name} connected`;
+      });
+
+      function trackPeer(id) {
+        let peer = session.peers.get(id);
+        if (peer) return peer;
+        peer = { nick: "", nameEls: [], notice: null };
+        session.peers.set(id, peer);
+        peer.notice = addNotice("Someone connected");
+        renderPresence();
+        session.sendNick(session.nick, id);
+        return peer;
+      }
+
+      room.onPeerJoin((id) => {
+        if (!session || session.gen !== gen) return;
+        trackPeer(id);
+      });
+
+      room.onPeerLeave((id) => {
+        if (!session || session.gen !== gen) return;
+        const peer = session.peers.get(id);
+        session.peers.delete(id);
+        addNotice(peer?.nick ? `${peer.nick} left` : "Someone left");
+        renderPresence();
+      });
+
+      youEl.textContent = nick;
+      setFingerprint(roomId);
+      resetLog();
+      renderPresence();
+      showChat();
+      document.title = `Closed room · ${nick}`;
+      draft.focus();
+      enterBtn.disabled = false;
+      enterBtn.textContent = "Enter";
+    }
+
+    async function exitRoom() {
+      const current = session;
+      session = null;
+      generation += 1;
+      leaveBtn.disabled = true;
+      if (current) {
+        try { await current.room.leave(); } catch { /* already closed */ }
+      }
+      resetLog();
+      showJoin();
+      leaveBtn.disabled = false;
+      nickInput.focus();
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const nick = cleanNick(nickInput.value);
+      const phrase = phraseInput.value.trim();
+      if (!nick && !phrase) {
+        formError.textContent = "A nickname and a phrase are required.";
+        return;
+      }
+      if (!nick) {
+        formError.textContent = "Enter a nickname.";
+        nickInput.focus();
+        return;
+      }
+      if (!phrase) {
+        formError.textContent = "Enter the room phrase.";
+        phraseInput.focus();
+        return;
+      }
+      nickInput.value = nick;
+      enterRoom(nick, phrase);
+    });
+
+    leaveBtn.addEventListener("click", () => { exitRoom(); });
+
+    composer.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!session) return;
+      const text = cleanMsg(draft.value);
+      if (!text) return;
+      if (session.peers.size === 0) {
+        sendStatus.textContent = "Waiting for someone. Message not sent.";
+        return;
+      }
+      sendStatus.textContent = "";
+      addMessage(text, true, null);
+      draft.value = "";
+      fitDraft();
+      session.sendMsg(text);
+    });
+
+    draft.addEventListener("input", fitDraft);
+    draft.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+
+    try {
+      const mod = await import("https://cdn.jsdelivr.net/npm/trystero@0.21.5/+esm");
+      joinRoom = mod.joinRoom;
+      selfId = mod.selfId;
+      if (typeof joinRoom !== "function" || !selfId) throw new Error("trystero");
+      enterBtn.disabled = false;
+      enterBtn.textContent = "Enter";
+    } catch {
+      formError.textContent = "Couldn't load the connection library. Check your network and reload.";
+    }
+  </script>
+</body>
+</html>

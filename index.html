@@ -25,6 +25,9 @@
       --accent-ink: #07140b;
       --own: #1b3324;
       --own-ink: #e6f4ea;
+      /* NEW: status dot colours (2.2) */
+      --warn: #e3b341;
+      --bad: #e5594f;
       --serif: Georgia, "Times New Roman", "DejaVu Serif", serif;
       --sans: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
       --mono: ui-monospace, "DejaVu Sans Mono", monospace;
@@ -188,8 +191,38 @@
 
     #enter:not(:disabled):hover, #send:not(:disabled):hover { filter: brightness(1.08); }
 
-    #enter:not(:disabled):active, #send:not(:disabled):active, #leave:not(:disabled):active {
+    #enter:not(:disabled):active, #send:not(:disabled):active, .ghost:not(:disabled):active {
       transform: scale(0.98);
+    }
+
+    /* NEW (1.2, 2.1): pill buttons under the phrase input, also reused in the chat header */
+    .phrase-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .ghost {
+      min-height: 40px;
+      padding: 0 14px;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: 0.88rem;
+    }
+
+    .ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
+    /* NEW (1.1): subtle privacy notice */
+    .privacy {
+      margin: 12px 0 0;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
     }
 
     .facts {
@@ -244,24 +277,43 @@
       white-space: nowrap;
     }
 
-    .sub, .presence, .waiting { margin: 2px 0 0; font-size: 0.84rem; }
+    .sub, .presence { margin: 2px 0 0; font-size: 0.84rem; }
 
     .presence { color: var(--ink); }
 
-    .waiting { color: var(--accent); }
+    /* NEW (2.2): connection status indicator */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0 0;
+      font-size: 0.84rem;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    .status[data-state="waiting"] .dot { background: var(--warn); }
+    .status[data-state="connected"] .dot { background: var(--accent); }
+    .status[data-state="disconnected"] .dot { background: var(--bad); }
 
     .fp { font-family: var(--mono); letter-spacing: 0.03em; }
 
-    #leave {
+    /* NEW (2.1): header buttons (Invite + Leave) */
+    .actions {
       flex: none;
-      min-height: 44px;
-      padding: 0 16px;
-      background: transparent;
-      border: 1px solid var(--line);
-      border-radius: 999px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
     }
 
-    #leave:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+    .actions .ghost { min-height: 44px; padding: 0 16px; font-size: 1rem; }
 
     .log {
       flex: 1;
@@ -393,17 +445,22 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      #enter, #send, #leave { transition: none; }
+      #enter, #send, .ghost { transition: none; }
     }
 
     @media (prefers-reduced-motion: no-preference) {
       .msg, .notice { animation: rise 180ms ease-out; }
-      #enter, #send, #leave { transition: transform 150ms ease, filter 150ms ease, border-color 150ms ease, color 150ms ease; }
+      #enter, #send, .ghost { transition: transform 150ms ease, filter 150ms ease, border-color 150ms ease, color 150ms ease; }
+      .status[data-state="waiting"] .dot { animation: pulse 1.4s ease-in-out infinite; }
     }
 
     @keyframes rise {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: none; }
+    }
+
+    @keyframes pulse {
+      50% { opacity: 0.35; }
     }
   </style>
 </head>
@@ -419,13 +476,24 @@
       <form id="join-form" class="sheet" autocomplete="off">
         <div>
           <label for="nick">Nickname</label>
-          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. Maria">
+          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. David">
           <p class="hint">Up to 24 characters.</p>
         </div>
         <div>
           <label for="phrase">Room phrase</label>
           <input id="phrase" name="phrase" maxlength="200" required autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="a phrase only you two know">
+
+          <!-- NEW (1.2 + 2.1): generate + copy-invite buttons. Insert directly under the phrase input. -->
+          <div class="phrase-tools">
+            <button id="gen" class="ghost" type="button">🎲 Generate Random Phrase</button>
+            <button id="copy-invite" class="ghost" type="button" disabled>📋 Copy Invite Link</button>
+          </div>
+          <p id="gen-note" class="hint" hidden></p>
+
           <p class="hint">Upper and lower case matter. Only a hash goes to the relays, not the phrase.</p>
+
+          <!-- NEW (1.1): IP visibility notice. Keep it near the phrase input. -->
+          <p class="privacy">🔒 Note: Direct Peer-to-Peer connection. Your IP address is visible to your peer. Use a VPN if you wish to remain fully anonymous.</p>
         </div>
         <p id="form-error" class="error" role="alert"></p>
         <button id="enter" type="submit" disabled>Loading…</button>
@@ -444,9 +512,17 @@
         <h1 id="you"></h1>
         <p id="print" class="sub"></p>
         <p id="count" class="presence"></p>
-        <p id="waiting" class="waiting"></p>
+        <!-- NEW (2.2): replaces the old #waiting line. State is set via data-state. -->
+        <p id="status" class="status" data-state="waiting" role="status">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="status-text">Waiting for peer to join...</span>
+        </p>
       </div>
-      <button id="leave" type="button">Leave</button>
+      <!-- NEW (2.1): wrapper with an in-chat invite button next to Leave -->
+      <div class="actions">
+        <button id="copy-invite-chat" class="ghost" type="button">📋 Invite</button>
+        <button id="leave" class="ghost" type="button">Leave</button>
+      </div>
     </header>
     <div id="log" class="log" role="log" aria-live="polite" aria-relevant="additions">
       <p id="empty" class="empty">Anyone who types the same phrase appears here. The conversation isn't kept anywhere.</p>
@@ -490,7 +566,6 @@
     const youEl = document.getElementById("you");
     const printEl = document.getElementById("print");
     const countEl = document.getElementById("count");
-    const waitingEl = document.getElementById("waiting");
     const logEl = document.getElementById("log");
     const emptyEl = document.getElementById("empty");
     const leaveBtn = document.getElementById("leave");
@@ -498,12 +573,226 @@
     const draft = document.getElementById("draft");
     const sendStatus = document.getElementById("send-status");
     const counter = document.getElementById("counter");
+    // NEW element references
+    const genBtn = document.getElementById("gen");
+    const genNote = document.getElementById("gen-note");
+    const copyInviteJoin = document.getElementById("copy-invite");
+    const copyInviteChat = document.getElementById("copy-invite-chat");
+    const statusEl = document.getElementById("status");
+    const statusText = document.getElementById("status-text");
 
     let joinRoom = null;
     let selfId = "";
     let session = null;
     let generation = 0;
 
+    // =====================================================================
+    // NEW (1.2) Random phrase generator
+    // Uses crypto.getRandomValues with rejection sampling (no modulo bias).
+    // Entropy = WORD_COUNT * log2(list size). Change WORD_COUNT to 5 for ~50 bits.
+    // =====================================================================
+    const WORD_COUNT = 4;
+    const WORDS = [...new Set(`
+      acorn alder algae alpine amber arbor aspen autumn badger bamboo basin bayou beach birch blossom boulder
+      branch breeze brook canyon cedar cliff clover coast cobalt comet coral cosmos cove crater creek crest
+      crystal current dawn delta desert dew dune dusk eagle ember estuary fern field fjord flint floral foam
+      forest fossil frost garden geyser glacier glade gorge grove gulf harbor hazel heath hedge hill horizon
+      island ivy jungle juniper lagoon lake lava leaf ledge lichen lilac lotus marsh meadow mesa mist moss
+      mountain nectar oasis ocean orchard otter palm pebble pine plain pond prairie quartz rain rapids reef
+      ridge river rock sage sand savanna shore sierra snow spring spruce stone storm stream summit sunrise
+      sunset swamp thicket tide timber trail tundra valley volcano waterfall willow wind winter woodland
+      antelope beaver bison bobcat camel cardinal cheetah cobra condor cougar coyote crane crow deer dingo
+      dolphin donkey dove dragonfly falcon ferret finch fox frog gazelle gecko giraffe goose gopher gorilla
+      hamster hawk heron hippo hornet hyena ibis iguana jackal jaguar kitten koala lemur leopard lizard llama
+      lobster lynx magpie mammoth manatee marten meerkat mole monkey moose moth mule narwhal newt ocelot
+      octopus osprey ostrich owl oyster panda panther parrot peacock pelican penguin pigeon pony puffin puma
+      python quail rabbit raccoon raven salmon seal shark sheep sparrow spider squid squirrel stork swan
+      tiger toad trout turkey turtle viper vulture walrus weasel whale wolf wombat yak zebra
+      anchor arrow badge banner basket beacon bell blanket bottle bridge brush bucket button cabin camera
+      candle canvas carpet castle chain chair chalk clock compass copper cradle crayon curtain cushion dial
+      drum easel engine fabric fence feather ferry flute fork funnel furnace gadget garage gear glove goblet
+      hammer handle helmet hinge hook jacket jar kettle key ladder lamp lantern lattice lever locket magnet
+      mantle marble mirror mitten needle notebook pencil pillow pitcher planet pocket puzzle quilt radio
+      ribbon rocket saddle sail satchel scarf shovel signal spindle spoon stairs stool table tablet teapot
+      thimble ticket toaster tower trumpet tunnel umbrella vase violin wagon wallet whistle window wrench
+      almond apple apricot bagel banana barley basil biscuit butter cabbage candy carrot celery cherry
+      chestnut cinnamon cocoa coconut cookie cracker cumin currant custard date dumpling fennel fig garlic
+      ginger grape guava hazelnut honey jam kiwi lemon lentil lime mango maple melon millet mint muffin
+      mustard noodle nutmeg oatmeal olive onion orange papaya parsley peach peanut pear pepper pickle pie
+      plum pumpkin radish raisin raspberry rice saffron salad sesame spinach sugar tangerine thyme tomato
+      truffle vanilla waffle walnut yogurt
+      azure beige bronze brown carmine cerulean charcoal cream crimson cyan ebony emerald gold gray green
+      indigo ivory jade khaki lavender magenta maroon mauve navy ochre peach pink purple rose ruby rust sable
+      scarlet silver sienna slate teal topaz umber violet yellow
+      arc arch circle cone cube curve cylinder diamond disc dome oval prism pyramid ring sphere spiral square star
+      able active agile bold brave bright brisk calm candid careful clever cosmic crisp curious daring eager
+      earnest elegant epic even fair famous fancy fast fierce fluent frank gentle giant glad golden grand
+      happy hardy honest humble hungry ideal jolly joyful keen kind lively loyal lucky magic merry mighty
+      modest noble patient peaceful polite proud quick quiet rapid ready regal robust royal sharp shiny
+      silent simple sleek smart smooth solid steady strong sturdy sunny swift tender tidy tiny tough true
+      trusty vivid warm wise witty young zesty
+      answer arrive balance bargain battle beauty border bounce cargo carry center chance change chapter
+      charge circuit citizen climate cluster collect column comfort common concert corner cotton courage
+      cover craft credit crowd custom dancer decade defend depth detail dinner direct doctor double dragon
+      dream driver duty earth echo editor effort empire energy enjoy entire episode escape evening exact
+      example expert factor family farmer father favor figure finger flavor flight flower follow forget
+      formal fortune forward friend future galaxy genius ghost glory grace guard guide habit harvest health
+      heart heaven history holiday honor hunter image insight journey judge justice kingdom kitchen knight
+      labor leader legend lesson letter liberty library light limit listen manner market master matter
+      memory mentor method middle miner minute moment morning motion museum music mystery nation native
+      nature nephew night nobody normal notice number object office orbit order origin outside paddle
+      painter palace paper parade partner passage pattern people period person picnic picture pilot pioneer
+      player pleasure poetry polish power prince promise public pursuit question rainbow reason record
+      remedy report rescue result reward rhythm riddle sailor salute school science season second secret
+      sector senior shadow shelter silence singer sister smile sound source spirit sponsor stable station
+      story studio sudden summer support surface system talent teacher temple thunder tonight travel
+      treasure trophy trust twelve unique update velvet victory village visitor voice voyage wander weather
+      weekend wonder worker youth
+    `.split(/\s+/).filter(Boolean))];
+
+    function randomIndex(n) {
+      // Rejection sampling: discard values that would bias the modulo.
+      const limit = Math.floor(0x100000000 / n) * n;
+      const buf = new Uint32Array(1);
+      do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+      return buf[0] % n;
+    }
+
+    function generatePhrase() {
+      const out = [];
+      for (let i = 0; i < WORD_COUNT; i++) out.push(WORDS[randomIndex(WORDS.length)]);
+      return out.join("-");
+    }
+
+    // =====================================================================
+    // NEW (2.1) Invite link via URL fragment
+    // Everything after "#" is never sent to the server by the browser.
+    // =====================================================================
+    function inviteLink(phrase) {
+      return location.origin + location.pathname + "#" + encodeURIComponent(phrase);
+    }
+
+    function syncInviteButton() {
+      copyInviteJoin.disabled = !phraseInput.value.trim();
+    }
+
+    function flashLabel(btn, text) {
+      const original = btn.dataset.label || btn.textContent;
+      btn.dataset.label = original;
+      btn.textContent = text;
+      setTimeout(() => { btn.textContent = original; }, 1600);
+    }
+
+    async function copyInvite(phrase, btn) {
+      phrase = (phrase || "").trim();
+      if (!phrase) return;
+      const url = inviteLink(phrase);
+      try {
+        await navigator.clipboard.writeText(url);
+        flashLabel(btn, "✅ Copied!");
+        return;
+      } catch { /* fall through to the legacy path */ }
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.append(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        if (ok) { flashLabel(btn, "✅ Copied!"); return; }
+      } catch { /* ignore */ }
+      window.prompt("Copy this invite link:", url);
+    }
+
+    // Read "#<phrase>", prefill the input, then strip the fragment from the address bar
+    // so the phrase does not linger in the URL or the history entry.
+    // To keep the fragment visible instead, delete the history.replaceState line.
+    function applyHash() {
+      const raw = location.hash.slice(1);
+      if (!raw) return;
+      let phrase = raw;
+      try { phrase = decodeURIComponent(raw); } catch { /* keep the raw value */ }
+      phrase = phrase.trim().slice(0, 200);
+      if (!phrase) return;
+      phraseInput.value = phrase;
+      genNote.hidden = true;
+      syncInviteButton();
+      history.replaceState(null, "", location.pathname + location.search);
+      if (!joinEl.hidden) nickInput.focus();
+    }
+
+    // Runs on DOMContentLoaded (or immediately if the DOM is already parsed).
+    // Registered before the library import below, so it never waits for the network.
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", applyHash);
+    } else {
+      applyHash();
+    }
+    window.addEventListener("hashchange", applyHash);
+
+    // =====================================================================
+    // NEW (2.3) Background notifications: beep + unread counter in the title
+    // =====================================================================
+    let unread = 0;
+    let audioCtx = null;
+
+    // Browsers only allow audio after a user gesture, so this is called from the Enter click.
+    function ensureAudio() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtx = audioCtx || new Ctx();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      } catch { /* audio is optional */ }
+    }
+
+    function beep() {
+      if (!audioCtx) return;
+      try {
+        const t = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, t);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.2);
+      } catch { /* ignore */ }
+    }
+
+    function defaultTitle() {
+      return session ? `Closed room · ${session.nick}` : "Closed room";
+    }
+
+    function updateTitle() {
+      document.title = unread > 0
+        ? `(${unread}) New Message${unread > 1 ? "s" : ""} - ClosedRoom`
+        : defaultTitle();
+    }
+
+    function notifyIncoming() {
+      if (!document.hidden) return;
+      unread += 1;
+      beep();
+      updateTitle();
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        unread = 0;
+        updateTitle();
+      }
+    });
+
+    // =====================================================================
+    // Existing helpers
+    // =====================================================================
     function cleanNick(value) {
       return String(value ?? "")
         .replace(/[\u0000-\u001F\u007F]/g, "")
@@ -548,11 +837,25 @@
       return p;
     }
 
-    function renderPresence() {
-      const n = session ? session.peers.size : 0;
-      countEl.textContent = `Connected: ${n}`;
-      waitingEl.hidden = n !== 0;
-      if (n === 0) waitingEl.textContent = "Waiting for someone";
+    // CHANGED (2.2): replaces renderPresence(). Drives the coloured dot + label.
+    const STATUS_TEXT = {
+      waiting: "Waiting for peer to join...",
+      connected: "Connected (Encrypted P2P)",
+      disconnected: "Peer disconnected"
+    };
+
+    function renderStatus() {
+      let state = "waiting";
+      let n = 0;
+      if (session) {
+        const peers = [...session.peers.values()];
+        n = peers.length;
+        if (peers.some((p) => p.ok)) state = "connected";
+        else if (session.everHadPeer) state = "disconnected";
+      }
+      statusEl.dataset.state = state;
+      statusText.textContent = STATUS_TEXT[state];
+      countEl.textContent = `Peers: ${n}`;
     }
 
     function setFingerprint(roomId) {
@@ -609,6 +912,7 @@
       chatEl.hidden = true;
       joinEl.hidden = false;
       document.body.classList.remove("locked");
+      unread = 0;
       document.title = "Closed room";
     }
 
@@ -674,7 +978,9 @@
       const [sendMsg, onMsg] = room.makeAction("msg");
       const [sendNick, onNick] = room.makeAction("nick");
 
-      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId };
+      // CHANGED: session also stores the phrase (for the in-chat invite button)
+      // and everHadPeer (to tell "waiting" apart from "disconnected").
+      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId, phrase, everHadPeer: false };
 
       onMsg((data, id) => {
         if (!session || session.gen !== gen || typeof data !== "string") return;
@@ -682,6 +988,7 @@
         if (!text) return;
         const peer = session.peers.get(id) || trackPeer(id);
         addMessage(text, false, peer);
+        notifyIncoming(); // NEW (2.3)
       });
 
       onNick((data, id) => {
@@ -697,10 +1004,29 @@
       function trackPeer(id) {
         let peer = session.peers.get(id);
         if (peer) return peer;
-        peer = { nick: "", nameEls: [], notice: null };
+        peer = { nick: "", nameEls: [], notice: null, ok: true };
         session.peers.set(id, peer);
+        session.everHadPeer = true;
+
+        // NEW (2.2): hook the underlying RTCPeerConnection when Trystero exposes it
+        // (room.getPeers() maps peerId -> RTCPeerConnection). If it doesn't, the
+        // indicator still follows onPeerJoin / onPeerLeave.
+        try {
+          const pc = room.getPeers()[id];
+          if (pc && typeof pc.addEventListener === "function") {
+            const update = () => {
+              const s = pc.connectionState || pc.iceConnectionState;
+              peer.ok = s !== "disconnected" && s !== "failed" && s !== "closed";
+              renderStatus();
+            };
+            pc.addEventListener("connectionstatechange", update);
+            pc.addEventListener("iceconnectionstatechange", update);
+            update();
+          }
+        } catch { /* indicator falls back to join/leave events */ }
+
         peer.notice = addNotice("Someone connected");
-        renderPresence();
+        renderStatus();
         session.sendNick(session.nick, id);
         return peer;
       }
@@ -715,15 +1041,15 @@
         const peer = session.peers.get(id);
         session.peers.delete(id);
         addNotice(peer?.nick ? `${peer.nick} left` : "Someone left");
-        renderPresence();
+        renderStatus();
       });
 
       youEl.textContent = nick;
       setFingerprint(roomId);
       resetLog();
-      renderPresence();
+      renderStatus();
       showChat();
-      document.title = `Closed room · ${nick}`;
+      document.title = defaultTitle();
       draft.focus();
       enterBtn.disabled = false;
       enterBtn.textContent = "Enter";
@@ -745,6 +1071,7 @@
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      ensureAudio(); // NEW (2.3): must run inside a user gesture
       const nick = cleanNick(nickInput.value);
       const phrase = phraseInput.value.trim();
       if (!nick && !phrase) {
@@ -764,6 +1091,25 @@
       nickInput.value = nick;
       enterRoom(nick, phrase);
     });
+
+    // NEW (1.2): generate button
+    genBtn.addEventListener("click", () => {
+      phraseInput.value = generatePhrase();
+      const bits = Math.round(WORD_COUNT * Math.log2(WORDS.length));
+      genNote.textContent = `${WORD_COUNT} random words from a ${WORDS.length}-word list, about ${bits} bits. Copy the invite link to share it.`;
+      genNote.hidden = false;
+      formError.textContent = "";
+      syncInviteButton();
+    });
+
+    // NEW (2.1): invite buttons
+    phraseInput.addEventListener("input", () => {
+      genNote.hidden = true;
+      syncInviteButton();
+    });
+    copyInviteJoin.addEventListener("click", () => copyInvite(phraseInput.value, copyInviteJoin));
+    copyInviteChat.addEventListener("click", () => copyInvite(session ? session.phrase : "", copyInviteChat));
+    syncInviteButton();
 
     leaveBtn.addEventListener("click", () => { exitRoom(); });
 

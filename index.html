@@ -4,13 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d0b">
-  <!-- NEW (PWA): manifest + iOS install metadata. Icons live next to index.html. -->
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="ClosedRoom">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="referrer" content="no-referrer">
   <meta name="description" content="Private peer-to-peer chat. The room phrase never leaves your browser and messages are not stored.">
   <title>Closed room</title>
@@ -483,7 +476,7 @@
       <form id="join-form" class="sheet" autocomplete="off">
         <div>
           <label for="nick">Nickname</label>
-          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. Maria">
+          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. David">
           <p class="hint">Up to 24 characters.</p>
         </div>
         <div>
@@ -555,14 +548,6 @@
     // Room id = SHA-256("chat-v1:" + lowercase phrase), first 32 hex chars.
     // The phrase itself is only Trystero's password, so Nostr relays never see it.
     // Two actions, created once per visit: "msg" and "nick". No TURN, no storage.
-
-    // NEW (PWA): register the service worker. Needs HTTPS (or localhost) and sw.js in the same folder.
-    // Fails silently: the chat works the same without it, you just can't install the app.
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js").catch(() => { /* optional feature */ });
-      });
-    }
 
     const APP_ID = "chat-v1";
     const RELAYS = [

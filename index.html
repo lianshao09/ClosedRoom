@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d0b">
+  <!-- NEW (PWA): manifest + iOS install metadata. Icons live next to index.html. -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ClosedRoom">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="referrer" content="no-referrer">
   <meta name="description" content="Private peer-to-peer chat. The room phrase never leaves your browser and messages are not stored.">
   <title>Closed room</title>
@@ -298,11 +305,40 @@
       background: var(--warn);
     }
 
-    .status[data-state="waiting"] .dot { background: var(--warn); }
+    .status[data-state="connecting"] .dot { background: var(--warn); }
     .status[data-state="connected"] .dot { background: var(--accent); }
+    .status[data-state="failed"] .dot,
     .status[data-state="disconnected"] .dot { background: var(--bad); }
 
     .fp { font-family: var(--mono); letter-spacing: 0.03em; }
+
+    /* NEW: always-visible "no server" note under the chat header */
+    .assurance {
+      margin: 0;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+
+    /* NEW: connection problem panel with Retry */
+    .problem {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 12px 16px 0;
+      padding: 12px 14px;
+      border: 1px solid var(--bad);
+      border-radius: 14px;
+      background: #1a1212;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .problem p { margin: 0; flex: 1; }
+
+    .problem .ghost { flex: none; border-color: var(--bad); }
 
     /* NEW (2.1): header buttons (Invite + Leave) */
     .actions {
@@ -451,7 +487,7 @@
     @media (prefers-reduced-motion: no-preference) {
       .msg, .notice { animation: rise 180ms ease-out; }
       #enter, #send, .ghost { transition: transform 150ms ease, filter 150ms ease, border-color 150ms ease, color 150ms ease; }
-      .status[data-state="waiting"] .dot { animation: pulse 1.4s ease-in-out infinite; }
+      .status[data-state="connecting"] .dot { animation: pulse 1.4s ease-in-out infinite; }
     }
 
     @keyframes rise {
@@ -476,7 +512,7 @@
       <form id="join-form" class="sheet" autocomplete="off">
         <div>
           <label for="nick">Nickname</label>
-          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. David">
+          <input id="nick" name="nick" maxlength="24" required autocomplete="nickname" autocapitalize="off" placeholder="e.g. Maria">
           <p class="hint">Up to 24 characters.</p>
         </div>
         <div>
@@ -513,17 +549,25 @@
         <p id="print" class="sub"></p>
         <p id="count" class="presence"></p>
         <!-- NEW (2.2): replaces the old #waiting line. State is set via data-state. -->
-        <p id="status" class="status" data-state="waiting" role="status">
+        <p id="status" class="status" data-state="connecting" role="status">
           <span class="dot" aria-hidden="true"></span>
-          <span id="status-text">Waiting for peer to join...</span>
+          <span id="status-text">Connecting…</span>
         </p>
       </div>
       <!-- NEW (2.1): wrapper with an in-chat invite button next to Leave -->
       <div class="actions">
         <button id="copy-invite-chat" class="ghost" type="button">📋 Invite</button>
+        <button id="clear" class="ghost" type="button" title="Clears messages on this device only">Clear chat</button>
         <button id="leave" class="ghost" type="button">Leave</button>
       </div>
     </header>
+    <!-- NEW: always-visible privacy note -->
+    <p class="assurance">🔒 Messages go straight to the other browser. No server sees or stores them, and closing this tab erases everything.</p>
+    <!-- NEW: shown when the connection fails or drops -->
+    <div id="problem" class="problem" role="alert" hidden>
+      <p id="problem-text"></p>
+      <button id="retry" class="ghost" type="button">Retry</button>
+    </div>
     <div id="log" class="log" role="log" aria-live="polite" aria-relevant="additions">
       <p id="empty" class="empty">Anyone who types the same phrase appears here. The conversation isn't kept anywhere.</p>
     </div>
@@ -548,6 +592,14 @@
     // Room id = SHA-256("chat-v1:" + lowercase phrase), first 32 hex chars.
     // The phrase itself is only Trystero's password, so Nostr relays never see it.
     // Two actions, created once per visit: "msg" and "nick". No TURN, no storage.
+
+    // NEW (PWA): register the service worker. Needs HTTPS (or localhost) and sw.js in the same folder.
+    // Fails silently: the chat works the same without it, you just can't install the app.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => { /* optional feature */ });
+      });
+    }
 
     const APP_ID = "chat-v1";
     const RELAYS = [
@@ -580,6 +632,13 @@
     const copyInviteChat = document.getElementById("copy-invite-chat");
     const statusEl = document.getElementById("status");
     const statusText = document.getElementById("status-text");
+    const problemEl = document.getElementById("problem");
+    const problemText = document.getElementById("problem-text");
+    const retryBtn = document.getElementById("retry");
+    const clearBtn = document.getElementById("clear");
+
+    // How long to look for the other person before calling it a failed connection.
+    const CONNECT_TIMEOUT_MS = 25000;
 
     let joinRoom = null;
     let selfId = "";
@@ -839,23 +898,34 @@
 
     // CHANGED (2.2): replaces renderPresence(). Drives the coloured dot + label.
     const STATUS_TEXT = {
-      waiting: "Waiting for peer to join...",
+      connecting: "Connecting…",
       connected: "Connected (Encrypted P2P)",
+      failed: "Could not connect",
       disconnected: "Peer disconnected"
     };
 
+    // Plain-language explanation shown next to the Retry button.
+    const PROBLEM_TEXT = {
+      failed: "Could not connect. Most likely the other person hasn't entered the exact same phrase yet, or a firewall or network (mobile data, work or school Wi-Fi) is blocking direct connections. Check the phrase, or try another network, then press Retry.",
+      disconnected: "The other person left or the connection dropped. Press Retry to look for them again."
+    };
+
     function renderStatus() {
-      let state = "waiting";
+      let state = "connecting";
       let n = 0;
       if (session) {
         const peers = [...session.peers.values()];
         n = peers.length;
         if (peers.some((p) => p.ok)) state = "connected";
         else if (session.everHadPeer) state = "disconnected";
+        else if (session.failed) state = "failed";
       }
       statusEl.dataset.state = state;
       statusText.textContent = STATUS_TEXT[state];
       countEl.textContent = `Peers: ${n}`;
+      const bad = state === "failed" || state === "disconnected";
+      problemEl.hidden = !bad;
+      if (bad) problemText.textContent = PROBLEM_TEXT[state];
     }
 
     function setFingerprint(roomId) {
@@ -980,7 +1050,7 @@
 
       // CHANGED: session also stores the phrase (for the in-chat invite button)
       // and everHadPeer (to tell "waiting" apart from "disconnected").
-      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId, phrase, everHadPeer: false };
+      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId, phrase, everHadPeer: false, failed: false, timer: 0 };
 
       onMsg((data, id) => {
         if (!session || session.gen !== gen || typeof data !== "string") return;
@@ -1007,6 +1077,8 @@
         peer = { nick: "", nameEls: [], notice: null, ok: true };
         session.peers.set(id, peer);
         session.everHadPeer = true;
+        session.failed = false;
+        clearTimeout(session.timer);
 
         // NEW (2.2): hook the underlying RTCPeerConnection when Trystero exposes it
         // (room.getPeers() maps peerId -> RTCPeerConnection). If it doesn't, the
@@ -1044,6 +1116,15 @@
         renderStatus();
       });
 
+      // If nobody shows up in time, flip to "Could not connect" (with Retry).
+      // Note: this cannot tell "they haven't joined" apart from "network blocks us", so the message covers both.
+      session.timer = setTimeout(() => {
+        if (session && session.gen === gen && !session.everHadPeer) {
+          session.failed = true;
+          renderStatus();
+        }
+      }, CONNECT_TIMEOUT_MS);
+
       youEl.textContent = nick;
       setFingerprint(roomId);
       resetLog();
@@ -1057,6 +1138,8 @@
 
     async function exitRoom() {
       const current = session;
+      if (current) clearTimeout(current.timer);
+      problemEl.hidden = true;
       session = null;
       generation += 1;
       leaveBtn.disabled = true;
@@ -1112,6 +1195,28 @@
     syncInviteButton();
 
     leaveBtn.addEventListener("click", () => { exitRoom(); });
+
+    // NEW: Retry = leave the room and join again with the same nickname and phrase.
+    retryBtn.addEventListener("click", async () => {
+      if (!session) return;
+      const { nick, phrase } = session;
+      const current = session;
+      clearTimeout(current.timer);
+      retryBtn.disabled = true;
+      session = null;
+      generation += 1;
+      try { await current.room.leave(); } catch { /* already closed */ }
+      retryBtn.disabled = false;
+      await enterRoom(nick, phrase);
+    });
+
+    // NEW: Clear chat = remove messages from this screen only. The other person's screen is unaffected.
+    clearBtn.addEventListener("click", () => {
+      const keep = emptyEl;
+      clearChildren(logEl);
+      keep.hidden = true;
+      addNotice("Chat cleared on this device.");
+    });
 
     composer.addEventListener("submit", (event) => {
       event.preventDefault();

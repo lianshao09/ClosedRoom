@@ -142,7 +142,7 @@
       <li><strong>Your browser hashes the phrase.</strong> It computes SHA-256 of the lowercased phrase and keeps the first 32 hex characters. That is the room ID. The phrase itself is never sent anywhere.</li>
       <li><strong>Browsers find each other.</strong> Using the open-source library <a href="https://github.com/dmotz/trystero" rel="noopener noreferrer">Trystero</a>, each browser posts a small signaling note to public Nostr relays, tagged with the room ID. The note is encrypted with your phrase, so relays only see unreadable data.</li>
       <li><strong>A direct connection opens.</strong> When two browsers read each other's notes they set up a WebRTC connection. WebRTC data channels are encrypted in transit (DTLS).</li>
-      <li><strong>Messages go browser to browser.</strong> Nothing is sent to the site's host or to the relays. Nothing is written to disk or to a database.</li>
+      <li><strong>Messages and files go browser to browser.</strong> Nothing is sent to the site's host or to the relays. Nothing is written to disk or to a database.</li>
       <li><strong>You close the tab and it's gone.</strong> There is no history to recover.</li>
     </ol>
 
@@ -153,7 +153,7 @@
           <tr><th>Party</th><th>Can see</th><th>Cannot see</th></tr>
         </thead>
         <tbody>
-          <tr><td>The other person</td><td>Your nickname, your messages, your IP address</td><td>Anything outside the chat</td></tr>
+          <tr><td>The other person</td><td>Your nickname, your messages, the files you send (with their names), your IP address</td><td>Anything outside the chat</td></tr>
           <tr><td>The site's host</td><td>That someone downloaded this page (IP, time)</td><td>Phrases, nicknames, messages</td></tr>
           <tr><td>Nostr relays</td><td>Your IP, the hashed room ID, encrypted signaling data</td><td>The phrase, nicknames, messages</td></tr>
           <tr><td>STUN servers</td><td>Your IP, to help work out your public address</td><td>Phrases, nicknames, messages</td></tr>
@@ -162,6 +162,15 @@
         </tbody>
       </table>
     </div>
+
+    <h2>Photos and files</h2>
+    <p>You can send a photo, a PDF or any other file, up to 50 MB. It travels over the same direct connection as messages, so no server sees it or keeps a copy.</p>
+    <ul>
+      <li><strong>The receiver decides.</strong> Files up to 10 MB arrive automatically. Bigger ones wait until the other person presses Accept, and nothing is transferred before that.</li>
+      <li><strong>Only real pictures are shown inline.</strong> The app checks the file's first bytes, not its name or claimed type, and only displays PNG, JPEG, GIF and WebP. Everything else (PDF, documents, archives, even a file renamed to .png) is download-only and never opened automatically.</li>
+      <li><strong>Treat files like email attachments.</strong> Anyone who knows the phrase can send you a file. Only open files from people you trust.</li>
+      <li><strong>Files live in memory.</strong> They disappear when the tab closes, a very large file can make a phone struggle, and an interrupted transfer starts again from the beginning.</li>
+    </ul>
 
     <h2>Known limits</h2>
     <ul>

@@ -437,6 +437,58 @@
 
     .counter[hidden] { display: none !important; }
 
+    /* NEW: file sharing */
+    .attach {
+      width: 48px;
+      height: 48px;
+      flex: none;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+
+    .attach:hover { border-color: var(--accent); color: var(--accent); }
+
+    .chat.dragging { outline: 2px dashed var(--accent); outline-offset: -8px; }
+
+    .filecard {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: min(230px, 70vw);
+    }
+
+    .filecard .thumb img {
+      display: block;
+      max-width: 100%;
+      max-height: 320px;
+      border-radius: 10px;
+    }
+
+    .fhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+
+    .fname { font-weight: 500; overflow-wrap: anywhere; }
+
+    .fsize { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+
+    .bar { width: 100%; height: 6px; accent-color: var(--accent); }
+
+    .fstatus { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+
+    .fstatus:empty, .factions:empty { display: none; }
+
+    .factions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .factions .ghost {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      text-decoration: none;
+      color: inherit;
+    }
+
     @media (min-width: 880px) {
       .join {
         display: grid;
@@ -574,6 +626,13 @@
     <p id="counter" class="counter" hidden>0 / 2000</p>
     <p id="send-status" class="send-status" role="status"></p>
     <form id="composer" class="composer">
+      <!-- NEW: attach a photo, PDF or any file (limits are set in the script: MAX_FILE / AUTO_ACCEPT) -->
+      <button id="attach" class="attach" type="button" aria-label="Attach a file" title="Send a photo, PDF or other file (up to 50 MB)">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </button>
+      <input id="file-input" type="file" multiple hidden>
       <label class="sr" for="draft">Message</label>
       <textarea id="draft" maxlength="2000" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
       <button id="send" type="submit" aria-label="Send">
@@ -639,6 +698,12 @@
 
     // How long to look for the other person before calling it a failed connection.
     const CONNECT_TIMEOUT_MS = 25000;
+
+    // File sharing limits. Files live in memory, so keep MAX_FILE modest (phones crash on huge ones).
+    const MAX_FILE = 50 * 1024 * 1024;      // hard limit per file
+    const AUTO_ACCEPT = 10 * 1024 * 1024;   // up to this size files arrive without asking; bigger ones need Accept
+    const attachBtn = document.getElementById("attach");
+    const fileInput = document.getElementById("file-input");
 
     let joinRoom = null;
     let selfId = "";
@@ -852,6 +917,338 @@
     // =====================================================================
     // Existing helpers
     // =====================================================================
+
+    // =====================================================================
+    // NEW: file sharing (photos, PDFs, anything up to MAX_FILE)
+    // Three Trystero actions (type names must be <= 12 bytes):
+    //   "foffer"  sender   -> peers   {id, name, size}      "I'd like to send you this file"
+    //   "fresp"   receiver -> sender  {id, ok}              accept / decline
+    //   "file"    sender   -> receiver  bytes + meta {id}   only sent after the receiver said ok
+    // Files live in memory only and disappear when the tab closes. Nothing touches a server.
+    // =====================================================================
+    const MAX_INCOMING = 10; // pending offers we will hold at once
+    let liveUrls = [];
+
+    function makeUrl(blob) {
+      const url = URL.createObjectURL(blob);
+      liveUrls.push(url);
+      return url;
+    }
+
+    function revokeUrls() {
+      for (const url of liveUrls) URL.revokeObjectURL(url);
+      liveUrls = [];
+    }
+
+    function fmtSize(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    // File names come from the other person, so treat them as untrusted text:
+    // drop control and bidi-override characters, path separators and leading dots.
+    function safeFileName(name) {
+      let s = String(name ?? "").normalize("NFC");
+      s = s.replace(/[\u0000-\u001F\u007F​-‏‪-‮⁦-⁩﻿]/g, "");
+      s = s.replace(/[\\/:*?"<>|]+/g, "_").replace(/^\.+/, "").trim();
+      if (s.length > 100) {
+        const dot = s.lastIndexOf(".");
+        const ext = dot > 0 && s.length - dot <= 10 ? s.slice(dot) : "";
+        s = s.slice(0, 100 - ext.length) + ext;
+      }
+      return s || "file";
+    }
+
+    // Decide "is this really a picture?" from the first bytes, never from the claimed type.
+    // Only these four raster formats are ever shown inline. SVG, HTML, PDF etc. are download-only.
+    function sniffImage(b) {
+      if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+          b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
+      if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+      if (b.length >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38 &&
+          (b[4] === 0x37 || b[4] === 0x39) && b[5] === 0x61) return "image/gif";
+      if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+          b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+      return null;
+    }
+
+    function randomId() {
+      const b = new Uint8Array(8);
+      crypto.getRandomValues(b);
+      return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+    }
+
+    function actionButton(label, onClick) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost";
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    // Trystero senders return promises; a peer that vanished mid-send must not raise unhandled rejections.
+    function quiet(promise) {
+      return Promise.resolve(promise).catch(() => {});
+    }
+
+    // A message-like bubble that holds one file: name, size, thumbnail, progress bar, status, buttons.
+    function createFileCard({ mine, peer, name, size }) {
+      const row = document.createElement("div");
+      row.className = mine ? "msg mine" : "msg theirs";
+
+      const box = document.createElement("div");
+      box.className = "bubble filecard";
+
+      const head = document.createElement("div");
+      head.className = "fhead";
+      const nameEl = document.createElement("span");
+      nameEl.className = "fname";
+      nameEl.textContent = name;
+      const sizeEl = document.createElement("span");
+      sizeEl.className = "fsize";
+      sizeEl.textContent = fmtSize(size);
+      head.append(nameEl, sizeEl);
+
+      const thumb = document.createElement("div");
+      thumb.className = "thumb";
+      const bar = document.createElement("progress");
+      bar.className = "bar";
+      bar.max = 1;
+      bar.value = 0;
+      bar.hidden = true;
+      const status = document.createElement("div");
+      status.className = "fstatus";
+      const actions = document.createElement("div");
+      actions.className = "factions";
+      box.append(head, thumb, bar, status, actions);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      if (mine) {
+        meta.textContent = time;
+        row.append(box, meta);
+      } else {
+        const who = document.createElement("span");
+        who.textContent = peer.nick || "…";
+        peer.nameEls.push(who);
+        const sep = document.createElement("span");
+        sep.textContent = " · ";
+        const clock = document.createElement("time");
+        clock.textContent = time;
+        meta.append(who, sep, clock);
+        row.append(meta, box);
+      }
+      pushNode(row);
+
+      return {
+        setStatus(text) { status.textContent = text; },
+        setProgress(p) {
+          bar.hidden = p == null;
+          if (p != null) bar.value = p;
+        },
+        setImage(url, alt) {
+          const img = document.createElement("img");
+          img.alt = alt;
+          img.addEventListener("load", () => { logEl.scrollTop = logEl.scrollHeight; });
+          img.src = url;
+          thumb.replaceChildren(img);
+        },
+        setActions(...nodes) { actions.replaceChildren(...nodes); }
+      };
+    }
+
+    // Sender side: summarise what every recipient did with this file.
+    function refreshOutgoing(out) {
+      const states = [...out.states.values()];
+      const n = (k) => states.filter((x) => x.state === k).length;
+      const offered = n("offered");
+      const sending = n("sending");
+      const done = n("done");
+      const declined = n("declined");
+      const failed = n("failed");
+      const active = states.filter((x) => x.state === "sending" || x.state === "done");
+      const pct = active.length ? active.reduce((a, x) => a + x.pct, 0) / active.length : 0;
+
+      if (sending > 0) {
+        out.card.setProgress(pct);
+        out.card.setStatus(`sending ${Math.round(pct * 100)}%`);
+        return;
+      }
+      if (offered > 0) {
+        out.card.setProgress(null);
+        out.card.setStatus("waiting for the other person to accept…");
+        return;
+      }
+      // Everyone has answered or failed: final state, and drop our reference to the file.
+      out.card.setProgress(null);
+      if (done === states.length) out.card.setStatus("sent");
+      else if (declined === states.length) out.card.setStatus("declined");
+      else if (done > 0) out.card.setStatus(`sent to ${done}, not received by ${declined + failed}`);
+      else out.card.setStatus(failed ? "failed: the connection dropped" : "declined");
+      if (session) session.outgoing.delete(out.id);
+    }
+
+    async function offerFile(file) {
+      const s = session;
+      const id = randomId();
+      const name = safeFileName(file.name);
+      const targets = [...s.peers.keys()];
+      const card = createFileCard({ mine: true, name, size: file.size });
+      const out = { id, file, card, states: new Map(targets.map((t) => [t, { state: "offered", pct: 0, last: 0 }])) };
+      s.outgoing.set(id, out);
+      card.setStatus("waiting for the other person to accept…");
+      try {
+        const mime = sniffImage(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+        if (mime) card.setImage(makeUrl(new Blob([file], { type: mime })), name);
+      } catch { /* preview is optional */ }
+      if (session !== s) return;
+      quiet(s.sendOffer({ id, name, size: file.size }, targets));
+    }
+
+    async function sendFiles(list) {
+      if (!session) return;
+      for (const file of list) {
+        const label = safeFileName(file.name);
+        if (file.size === 0) { sendStatus.textContent = `${label} is empty.`; continue; }
+        if (file.size > MAX_FILE) { sendStatus.textContent = `${label} is too large (limit ${fmtSize(MAX_FILE)}).`; continue; }
+        if (!session || session.peers.size === 0) { sendStatus.textContent = "Waiting for someone. File not sent."; break; }
+        sendStatus.textContent = "";
+        await offerFile(file);
+      }
+    }
+
+    // When a peer leaves, mark their half-finished transfers as interrupted.
+    function dropPeerTransfers(s, peerId) {
+      for (const [key, e] of s.incoming) {
+        if (e.peerId !== peerId) continue;
+        s.incoming.delete(key);
+        e.card.setActions();
+        e.card.setProgress(null);
+        e.card.setStatus("interrupted: the other person left");
+      }
+      for (const out of [...s.outgoing.values()]) {
+        const st = out.states.get(peerId);
+        if (st && (st.state === "offered" || st.state === "sending")) {
+          st.state = "failed";
+          refreshOutgoing(out);
+        }
+      }
+    }
+
+    // Receiver side. Called once per room visit from enterRoom().
+    function wireFileActions(gen, { onOffer, onResp, onFile, onFileProgress }, trackPeer) {
+      const live = () => session && session.gen === gen;
+      const idOf = (meta) => (meta && typeof meta === "object" && typeof meta.id === "string" ? meta.id : "");
+
+      onOffer((o, peerId) => {
+        if (!live()) return;
+        const s = session;
+        const valid = o && typeof o === "object" && typeof o.id === "string" && /^[0-9a-f]{16}$/.test(o.id) &&
+          Number.isSafeInteger(o.size) && o.size > 0 && typeof o.name === "string";
+        if (!valid) return;
+        const key = peerId + ":" + o.id;
+        if (s.incoming.has(key)) return;
+        if (o.size > MAX_FILE || s.incoming.size >= MAX_INCOMING) {
+          quiet(s.sendResp({ id: o.id, ok: false }, peerId));
+          return;
+        }
+        const peer = s.peers.get(peerId) || trackPeer(peerId);
+        const name = safeFileName(o.name);
+        const card = createFileCard({ mine: false, peer, name, size: o.size });
+        const entry = { peerId, id: o.id, name, size: o.size, card, state: "offered" };
+        s.incoming.set(key, entry);
+        notifyIncoming();
+
+        const accept = () => {
+          if (session !== s || entry.state !== "offered") return;
+          entry.state = "accepted";
+          card.setActions();
+          card.setProgress(0);
+          card.setStatus("receiving…");
+          quiet(s.sendResp({ id: o.id, ok: true }, peerId));
+        };
+        const decline = () => {
+          if (session !== s || entry.state !== "offered") return;
+          s.incoming.delete(key);
+          card.setActions();
+          card.setStatus("declined");
+          quiet(s.sendResp({ id: o.id, ok: false }, peerId));
+        };
+
+        if (o.size <= AUTO_ACCEPT) {
+          accept();
+        } else {
+          card.setStatus("wants to send you this file");
+          card.setActions(actionButton("Accept", accept), actionButton("Decline", decline));
+        }
+      });
+
+      onResp((r, peerId) => {
+        if (!live()) return;
+        const s = session;
+        if (!r || typeof r !== "object" || typeof r.id !== "string") return;
+        const out = s.outgoing.get(r.id);
+        const st = out && out.states.get(peerId);
+        if (!st || st.state !== "offered") return;
+        if (r.ok !== true) {
+          st.state = "declined";
+          refreshOutgoing(out);
+          return;
+        }
+        st.state = "sending";
+        refreshOutgoing(out);
+        s.sendFile(out.file, peerId, { id: out.id }, (p) => {
+          if (p < 1 && p - st.last < 0.01) return; // throttle UI updates
+          st.pct = p;
+          st.last = p;
+          refreshOutgoing(out);
+        })
+          .then(() => { st.state = "done"; st.pct = 1; refreshOutgoing(out); })
+          .catch(() => { st.state = "failed"; refreshOutgoing(out); });
+      });
+
+      onFileProgress((p, peerId, meta) => {
+        if (!live()) return;
+        const entry = session.incoming.get(peerId + ":" + idOf(meta));
+        if (!entry || entry.state !== "accepted") return;
+        entry.card.setProgress(p);
+        entry.card.setStatus(`receiving ${Math.round(p * 100)}%`);
+      });
+
+      onFile((data, peerId, meta) => {
+        if (!live()) return;
+        const s = session;
+        const key = peerId + ":" + idOf(meta);
+        const entry = s.incoming.get(key);
+        // Bytes we never agreed to receive are ignored.
+        if (!entry || entry.state !== "accepted") return;
+        s.incoming.delete(key);
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+        if (bytes.byteLength === 0 || bytes.byteLength > entry.size || bytes.byteLength > MAX_FILE) {
+          entry.card.setProgress(null);
+          entry.card.setStatus("rejected: the file did not match what was offered");
+          return;
+        }
+        const mime = sniffImage(bytes);
+        const url = makeUrl(new Blob([bytes], { type: mime || "application/octet-stream" }));
+        entry.card.setProgress(null);
+        if (mime) {
+          entry.card.setImage(url, entry.name);
+          entry.card.setStatus("received");
+        } else {
+          entry.card.setStatus("received. Only open files from people you trust.");
+        }
+        const link = document.createElement("a");
+        link.className = "ghost";
+        link.href = url;
+        link.download = entry.name;
+        link.textContent = "Download";
+        entry.card.setActions(link);
+      });
+    }
     function cleanNick(value) {
       return String(value ?? "")
         .replace(/[\u0000-\u001F\u007F]/g, "")
@@ -969,6 +1366,7 @@
     }
 
     function resetLog() {
+      revokeUrls();
       clearChildren(logEl);
       emptyEl.hidden = false;
       logEl.append(emptyEl);
@@ -1047,10 +1445,18 @@
 
       const [sendMsg, onMsg] = room.makeAction("msg");
       const [sendNick, onNick] = room.makeAction("nick");
+      // NEW: file sharing actions (see the protocol notes above wireFileActions)
+      const [sendOffer, onOffer] = room.makeAction("foffer");
+      const [sendResp, onResp] = room.makeAction("fresp");
+      const [sendFile, onFile, onFileProgress] = room.makeAction("file");
 
       // CHANGED: session also stores the phrase (for the in-chat invite button)
       // and everHadPeer (to tell "waiting" apart from "disconnected").
-      session = { gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId, phrase, everHadPeer: false, failed: false, timer: 0 };
+      session = {
+        gen, room, sendMsg, sendNick, peers: new Map(), nick, roomId, phrase, everHadPeer: false, failed: false, timer: 0,
+        // NEW: file sharing state
+        sendOffer, sendResp, sendFile, outgoing: new Map(), incoming: new Map()
+      };
 
       onMsg((data, id) => {
         if (!session || session.gen !== gen || typeof data !== "string") return;
@@ -1112,9 +1518,12 @@
         if (!session || session.gen !== gen) return;
         const peer = session.peers.get(id);
         session.peers.delete(id);
+        dropPeerTransfers(session, id); // NEW
         addNotice(peer?.nick ? `${peer.nick} left` : "Someone left");
         renderStatus();
       });
+
+      wireFileActions(gen, { onOffer, onResp, onFile, onFileProgress }, trackPeer); // NEW
 
       // If nobody shows up in time, flip to "Could not connect" (with Retry).
       // Note: this cannot tell "they haven't joined" apart from "network blocks us", so the message covers both.
@@ -1213,6 +1622,7 @@
     // NEW: Clear chat = remove messages from this screen only. The other person's screen is unaffected.
     clearBtn.addEventListener("click", () => {
       const keep = emptyEl;
+      revokeUrls();
       clearChildren(logEl);
       keep.hidden = true;
       addNotice("Chat cleared on this device.");
@@ -1240,6 +1650,36 @@
         event.preventDefault();
         composer.requestSubmit();
       }
+    });
+
+    // NEW: attach button, file picker and drag-and-drop onto the chat
+    attachBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      const files = [...fileInput.files];
+      fileInput.value = "";
+      sendFiles(files);
+    });
+
+    let dragDepth = 0;
+    const hasFiles = (e) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+    chatEl.addEventListener("dragenter", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth += 1;
+      chatEl.classList.add("dragging");
+    });
+    chatEl.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+    chatEl.addEventListener("dragleave", (e) => {
+      if (!hasFiles(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) chatEl.classList.remove("dragging");
+    });
+    chatEl.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      chatEl.classList.remove("dragging");
+      sendFiles([...e.dataTransfer.files]);
     });
 
     try {

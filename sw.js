@@ -2,7 +2,7 @@
 // Caches only the static app shell so the page opens fast and is installable.
 // It never sees chat data: messages travel over WebRTC, not through fetch().
 // Bump VERSION whenever any cached file changes, so old caches are dropped.
-const VERSION = "v4";
+const VERSION = "v5";
 const CACHE = "closedroom-" + VERSION;
 const SHELL = [
   "./",

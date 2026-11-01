@@ -235,9 +235,50 @@
     .facts {
       list-style: none;
       margin: 8px 0 0;
-      padding: 8px 20px 28px;
+      padding: 8px 20px 0;
       display: grid;
       gap: 10px;
+    }
+
+    /* NEW: link card to the sister project (same look as the "Closed room" card on directshare.site) */
+    .below { padding-bottom: 28px; }
+
+    .sister {
+      margin: 22px 20px 0;
+      padding: 14px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--raise);
+    }
+
+    .sister p {
+      margin: 0;
+      flex: 1 1 220px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .sister p strong {
+      display: block;
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+
+    .sister .ghost {
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: inherit;
     }
 
     .facts li {
@@ -505,13 +546,17 @@
         padding: 64px 56px 12px;
       }
 
-      .facts {
+      .below {
         grid-column: 1;
         grid-row: 2;
         align-self: start;
-        padding: 12px 56px 64px;
+        padding-bottom: 64px;
         max-width: 46rem;
       }
+
+      .facts { padding: 12px 56px 0; }
+
+      .sister { margin: 22px 56px 0; }
 
       .panel {
         grid-column: 2;
@@ -587,11 +632,20 @@
         <button id="enter" type="submit" disabled>Loading…</button>
       </form>
     </section>
-    <ul class="facts">
-      <li>The room ID is the first 32 hex characters of the SHA-256 of the lowercased phrase.</li>
-      <li>The connection is WebRTC, without TURN. On a very restrictive network the other person may not show up.</li>
-      <li>Nothing remains after you leave or close the tab.</li>
-    </ul>
+    <div class="below">
+      <ul class="facts">
+        <li>The room ID is the first 32 hex characters of the SHA-256 of the lowercased phrase.</li>
+        <li>The connection is WebRTC, without TURN. On a very restrictive network the other person may not show up.</li>
+        <li>Nothing remains after you leave or close the tab.</li>
+      </ul>
+      <!-- NEW: button to the sister project. Opens in a new tab so nobody leaves a chat by accident. -->
+      <div class="sister">
+        <p><strong>Direct share</strong>Send files straight from one browser to another. Same idea: no accounts, nothing stored.</p>
+        <a class="ghost" href="https://directshare.site/" target="_blank" rel="noopener noreferrer">Open Direct share
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>
+        </a>
+      </div>
+    </div>
   </div>
 
   <div id="chat" class="chat" hidden>
